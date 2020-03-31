@@ -17,104 +17,131 @@ fn index(l: bool, c: bool, r: bool) -> u8 {
     (l as u8) << 2 | (c as u8) << 1 | (r as u8)
 }
 
-/// Processes the current state and producess the next one
-///
-/// # Arguments
-///
-/// * `nbv` the new state
-/// * `nb` the current state
-fn step(nbv: &mut BitVec<u32>, bv: &BitVec<u32>, rule: u8) {
-    let end = bv.len() - 1;
-
-    // handles edges
-    nbv.set(0, (rule >> index(false, bv[0], bv[1])) & 1 == 1);
-    nbv.set(end, (rule >> index(bv[end - 1], bv[end], false)) & 1 == 1);
-
-    for i in 1..end {
-        nbv.set(i, (rule >> index(bv[i - 1], bv[i], bv[i + 1])) & 1 == 1);
-    }
+struct Generator {
+    rule: u8,
+    steps: u32,
+    current: BitVec<u32>,
+    next: BitVec<u32>,
 }
 
-/// Generates the states and calls a callback function each step
-///
-/// # Arguments
-/// * `rule` the rule
-/// * `steps` the number of steps
-/// * `cb` the callback function, receives the current iteration (starts at 0) and the current state
-fn generate<F>(rule: u8, steps: u32, mut cb: F) where F: FnMut(u32, &BitVec<u32>) {
-    let n = steps as usize;
-    let len = 2 * n + 1;
+impl Generator {
+    fn new(rule: u8, steps: u32) -> Self {
+        let current = BitVec::from_elem((2 * steps + 1) as usize, false);
+        let next = BitVec::from_elem((2 * steps + 1) as usize, false);
 
-    let mut nbv = BitVec::from_elem(len as usize, false);
-    let mut bv = BitVec::from_elem(len as usize, false);
-
-    nbv.set(n, true);
-    cb(0, &nbv);
-
-    for i in 1..(steps + 1) {
-        std::mem::swap(&mut bv, &mut nbv);
-        step(&mut nbv, &bv, rule);
-        cb(i, &nbv);
+        Self { rule, steps, current, next }
     }
-}
 
-/// Same as `generate` but writes png output to a `Write`
-///
-/// # Arguments
-/// * `w` the `Write` implementation
-/// * `rule` the rule
-/// * `steps` the number of steps
-fn generate_to_writer<W>(ref mut w: W, rule: u8, steps: u32) where W: Write {
-    let mut encoder = png::Encoder::new(w, 2 * steps + 1, steps + 1);
-    encoder.set_color(png::ColorType::Grayscale);
-    encoder.set_depth(png::BitDepth::One);
+    fn init(&mut self) {
+        self.current.set(self.steps as usize, true);
+    }
 
-    let mut writer = encoder.write_header().unwrap();
-    let mut writer = writer.stream_writer();
+    fn next(&mut self) {
+        let bv = &self.current;
+        let nbv = &mut self.next;
+        let end = bv.len() - 1;
+    
+        // handles edges
+        nbv.set(0, (self.rule >> index(false, bv[0], bv[1])) & 1 == 1);
+        nbv.set(end, (self.rule >> index(bv[end - 1], bv[end], false)) & 1 == 1);
+    
+        for i in 1..end {
+            nbv.set(i, (self.rule >> index(bv[i - 1], bv[i], bv[i + 1])) & 1 == 1);
+        }
 
-    generate(rule, steps, |_, bv| {
-        // TODO: avoid a copy
-        let data = bv.to_bytes();
-        writer.write(&data).unwrap();
-    });
+        std::mem::swap(&mut self.current, &mut self.next);
+    }
 
-    writer.finish().unwrap();
+    #[inline]
+    fn write_png<W: Write>(&mut self, w: &mut W) -> std::io::Result<()> {
+        let data = self.current.to_bytes();
+        w.write_all(&data)?;
+        Ok(())
+    }
+
+    fn generate_png<W: Write>(&mut self, w: &mut W) -> std::io::Result<()> {
+        let mut encoder = png::Encoder::new(w, 2 * self.steps + 1, self.steps + 1);
+        encoder.set_color(png::ColorType::Grayscale);
+        encoder.set_depth(png::BitDepth::One);
+    
+        let mut writer = encoder.write_header()?;
+        let mut writer = writer.stream_writer();
+
+        self.write_png(&mut writer)?;
+
+        for _ in 1..(self.steps + 1) {
+            self.next();
+            self.write_png(&mut writer)?;
+        }
+    
+        writer.finish()?;
+        Ok(())
+    }
+
+    fn write_ascii<W: Write>(&self, w: &mut W) -> std::io::Result<()> {
+        for bit in self.current.iter() {
+            if bit {
+                w.write_all("█".as_bytes())?;
+            } else {
+                w.write_all(" ".as_bytes())?;
+            }
+        }
+        w.write_all("\n".as_bytes())?;
+        w.flush()?;
+        Ok(())
+    }
+
+    fn generate_ascii<W: Write>(&mut self, mut w: &mut W) -> std::io::Result<()> {
+        self.write_ascii(&mut w)?;
+
+        for _ in 1..(self.steps + 1) {
+            self.next();
+            self.write_ascii(&mut w)?;
+        }
+        Ok(())
+    }
 }
 
 fn main() {
     let matches = clap_app!(conus => 
-        (version: "1.0")
+        (version: "0.2")
         (author: "Vinicius H. P. Giroto <viniciusgiroto@usp.br>")
         (about: "Generates cellular automata diagrams")
         (@arg RULE: +required "Sets the rule number")
         (@arg ITER: +required "Number of iterations")
         (@arg FILE: -o +takes_value "Output file")
-        (@arg ASCII: -a "ASCII mode")
+        (@arg FORMAT: -f --output-format +takes_value "Output format (ascii,png)")
     ).get_matches();
 
     let rule: u8 = matches.value_of("RULE").unwrap().parse().expect("Rule must be a number between 0 and 255.");
     let steps: u32 = matches.value_of("ITER").unwrap().parse().expect("Iter must be a number bigger than or equal to zero.");
+    let format = matches.value_of("FORMAT").or_else(|| Some("ascii")).unwrap();
+    let path = matches.value_of_os("FILE");
 
-    if matches.is_present("ASCII") {
-        generate(rule, steps, |_, bv| {
-            for bit in bv.iter() {
-                if bit {
-                    print!("█");
-                } else {
-                    print!(" ");
-                }
-            }
-            println!("");
-        });
-    } else {
-        if let Some(value) = matches.value_of_os("FILE") {
-            generate_to_writer({
-                let path = Path::new(value);
-                let file = File::create(path).unwrap();
-                BufWriter::new(file)
-            }, rule, steps);
-        } else {
-            generate_to_writer(BufWriter::new(std::io::stdout()), rule, steps);
+    /* Initial state */
+    let mut generator = Generator::new(rule, steps);
+    generator.init();
+
+    /**/
+    if let Some(value) = path {
+        let mut write = {
+            let path = Path::new(value);
+            let file = File::create(path).unwrap();
+            BufWriter::new(file)
+        };
+
+        match format {
+            "ascii" => { generator.generate_ascii(&mut write); }
+            "png" => { generator.generate_png(&mut write); }
+            _ => {}
         }
-    } 
+    } else {
+        let mut write = BufWriter::new(std::io::stdout());
+
+        match format {
+            "ascii" => { generator.generate_ascii(&mut write); }
+            "png" => { generator.generate_png(&mut write); }
+            _ => {}
+        }
+    }
 }

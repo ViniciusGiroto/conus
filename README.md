@@ -7,15 +7,15 @@ The name is based on the first thing I saw on the [Rule 30](https://en.wikipedia
 
 ```
 USAGE:
-    conus [FLAGS] [OPTIONS] <RULE> <ITER>
+    conus [OPTIONS] <RULE> <ITER>
 
 FLAGS:
-    -a               ASCII mode
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-    -o <FILE>        Output file
+    -o <FILE>                Output file
+    -f, --output <FORMAT>    Output format (ascii,png)
 
 ARGS:
     <RULE>    Sets the rule number
@@ -26,7 +26,7 @@ ARGS:
 
 One hundred iterations of the rule 30
 ```bash
-conus 30 100 > rule30.png
+conus 30 100 > rule30.txt
 ```
 
 # Plans
