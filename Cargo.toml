@@ -1,0 +1,12 @@
+[package]
+name = "conus"
+version = "0.1.0"
+authors = ["Vinicius H. P. Giroto <viniciusgiroto@usp.br>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bit-vec = "~0.6"
+clap = "~2.33"
+png = "~0.16"
